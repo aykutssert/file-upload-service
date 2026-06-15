@@ -5,7 +5,9 @@ import "testing"
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("UPLOAD_API_DATABASE_URL", "")
 	t.Setenv("UPLOAD_API_HOST", "")
+	t.Setenv("UPLOAD_API_NATS_HEALTH_URL", "")
 	t.Setenv("UPLOAD_API_PORT", "")
+	t.Setenv("UPLOAD_API_SEAWEEDFS_HEALTH_URL", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -18,12 +20,20 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DatabaseURL != defaultDatabaseURL {
 		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
 	}
+	if cfg.NATSHealthURL != defaultNATSHealthURL {
+		t.Fatalf("NATSHealthURL = %q", cfg.NATSHealthURL)
+	}
+	if cfg.SeaweedFSHealthURL != defaultSeaweedFSHealthURL {
+		t.Fatalf("SeaweedFSHealthURL = %q", cfg.SeaweedFSHealthURL)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
 	t.Setenv("UPLOAD_API_DATABASE_URL", "postgres://example")
 	t.Setenv("UPLOAD_API_HOST", "0.0.0.0")
+	t.Setenv("UPLOAD_API_NATS_HEALTH_URL", "http://nats/health")
 	t.Setenv("UPLOAD_API_PORT", "9000")
+	t.Setenv("UPLOAD_API_SEAWEEDFS_HEALTH_URL", "http://storage/health")
 
 	cfg, err := Load()
 	if err != nil {
@@ -35,6 +45,12 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.DatabaseURL != "postgres://example" {
 		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
+	}
+	if cfg.NATSHealthURL != "http://nats/health" {
+		t.Fatalf("NATSHealthURL = %q", cfg.NATSHealthURL)
+	}
+	if cfg.SeaweedFSHealthURL != "http://storage/health" {
+		t.Fatalf("SeaweedFSHealthURL = %q", cfg.SeaweedFSHealthURL)
 	}
 }
 

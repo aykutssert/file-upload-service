@@ -13,6 +13,7 @@ import (
 	"github.com/aykutssert/file-upload-service/internal/config"
 	"github.com/aykutssert/file-upload-service/internal/database"
 	"github.com/aykutssert/file-upload-service/internal/httpapi"
+	"github.com/aykutssert/file-upload-service/internal/readiness"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -33,9 +34,15 @@ func main() {
 	}
 	defer pool.Close()
 
+	checker := readiness.New(
+		pool,
+		readiness.NewHTTPChecker(http.DefaultClient, cfg.SeaweedFSHealthURL),
+		readiness.NewHTTPChecker(http.DefaultClient, cfg.NATSHealthURL),
+	)
+
 	server := &http.Server{
 		Addr:              cfg.Address(),
-		Handler:           httpapi.NewRouter(pool),
+		Handler:           httpapi.NewRouter(checker),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

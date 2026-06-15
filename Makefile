@@ -1,4 +1,4 @@
-.PHONY: check db-down db-migrate db-up fmt fmt-check test test-race vet
+.PHONY: check db-down db-migrate db-up fmt fmt-check services-up test test-race vet
 
 check: fmt-check vet test test-race
 
@@ -29,3 +29,6 @@ db-migrate:
 		-dir migrations postgres \
 		"$${UPLOAD_API_DATABASE_URL:-postgres://file_upload:local-development-only@127.0.0.1:5432/file_upload?sslmode=disable}" \
 		up
+
+services-up:
+	docker compose up -d --build --wait

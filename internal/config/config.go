@@ -8,15 +8,19 @@ import (
 )
 
 const (
-	defaultDatabaseURL = "postgres://file_upload:local-development-only@127.0.0.1:5432/file_upload?sslmode=disable"
-	defaultHost        = "127.0.0.1"
-	defaultPort        = 8080
+	defaultDatabaseURL        = "postgres://file_upload:local-development-only@127.0.0.1:5432/file_upload?sslmode=disable"
+	defaultHost               = "127.0.0.1"
+	defaultNATSHealthURL      = "http://127.0.0.1:8222/healthz"
+	defaultPort               = 8080
+	defaultSeaweedFSHealthURL = "http://127.0.0.1:9333/cluster/status"
 )
 
 type Config struct {
-	DatabaseURL string
-	Host        string
-	Port        int
+	DatabaseURL        string
+	Host               string
+	NATSHealthURL      string
+	Port               int
+	SeaweedFSHealthURL string
 }
 
 func Load() (Config, error) {
@@ -26,7 +30,15 @@ func Load() (Config, error) {
 			defaultDatabaseURL,
 		),
 		Host: valueOrDefault("UPLOAD_API_HOST", defaultHost),
+		NATSHealthURL: valueOrDefault(
+			"UPLOAD_API_NATS_HEALTH_URL",
+			defaultNATSHealthURL,
+		),
 		Port: defaultPort,
+		SeaweedFSHealthURL: valueOrDefault(
+			"UPLOAD_API_SEAWEEDFS_HEALTH_URL",
+			defaultSeaweedFSHealthURL,
+		),
 	}
 
 	if value := os.Getenv("UPLOAD_API_PORT"); value != "" {
