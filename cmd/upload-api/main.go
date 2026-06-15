@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +13,7 @@ import (
 	"github.com/aykutssert/file-upload-service/internal/config"
 	"github.com/aykutssert/file-upload-service/internal/database"
 	"github.com/aykutssert/file-upload-service/internal/httpapi"
+	"github.com/aykutssert/file-upload-service/internal/httpserver"
 	"github.com/aykutssert/file-upload-service/internal/readiness"
 )
 
@@ -41,9 +42,14 @@ func main() {
 	)
 
 	server := &http.Server{
-		Addr:              cfg.Address(),
 		Handler:           httpapi.NewRouter(checker),
 		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	listener, err := net.Listen("tcp", cfg.Address())
+	if err != nil {
+		logger.Error("listen", "error", err)
+		os.Exit(1)
 	}
 
 	ctx, stop := signal.NotifyContext(
@@ -53,32 +59,8 @@ func main() {
 	)
 	defer stop()
 
-	errCh := make(chan error, 1)
-	go func() {
-		logger.Info("server started", "address", server.Addr)
-		errCh <- server.ListenAndServe()
-	}()
-
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("server stopped unexpectedly", "error", err)
-			os.Exit(1)
-		}
-	case <-ctx.Done():
-		logger.Info("shutdown requested")
-	}
-
-	shutdownCtx, cancel := context.WithTimeout(
-		context.Background(),
-		shutdownTimeout,
-	)
-	defer cancel()
-
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Error("graceful shutdown failed", "error", err)
+	if err := httpserver.Run(ctx, server, listener, shutdownTimeout, logger); err != nil {
+		logger.Error("run server", "error", err)
 		os.Exit(1)
 	}
-
-	logger.Info("server stopped")
 }

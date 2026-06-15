@@ -1,4 +1,4 @@
-.PHONY: check db-down db-migrate db-up fmt fmt-check services-up test test-race vet
+.PHONY: check db-down db-migrate db-up fmt fmt-check schema-check services-up test test-race vet
 
 check: fmt-check vet test test-race
 
@@ -32,3 +32,7 @@ db-migrate:
 
 services-up:
 	docker compose up -d --build --wait
+	$(MAKE) db-migrate
+
+schema-check:
+	sh scripts/schema-check.sh

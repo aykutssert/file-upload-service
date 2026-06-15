@@ -54,3 +54,35 @@ jobs:
 
       - name: Build API image
         run: docker build --tag file-upload-service:test .
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.4
+
+      - name: Start local platform
+        run: make services-up
+
+      - name: Verify schema constraints
+        run: make schema-check
+
+      - name: Verify health endpoints
+        run: |
+          curl --fail --silent http://127.0.0.1:8080/health/live
+          curl --fail --silent http://127.0.0.1:8080/health/ready
+
+      - name: Show service logs
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop local platform
+        if: always()
+        run: docker compose down --volumes

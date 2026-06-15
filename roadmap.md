@@ -154,6 +154,13 @@ Completion criteria:
 - Shutdown drains active HTTP requests.
 - Formatting, linting, tests, race checks, and image builds pass.
 
+Status: complete. The Go API, PostgreSQL, SeaweedFS, and NATS JetStream start
+with one command under Docker Compose. Configuration, JSON logging, health
+checks, graceful shutdown, migrations, API key middleware contracts, unit and
+race tests, container builds, schema constraints, and clean-environment CI
+validation are implemented. Evidence and operational limits are documented in
+`REPORT.md`.
+
 ## v0.2 - Direct Upload And Download
 
 Implement the secure single-part upload lifecycle.
