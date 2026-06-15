@@ -1,0 +1,30 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+info.md
+
+# Go
+bin/
+coverage/
+coverage.out
+*.test
+*.prof
+
+# Build output
+dist/
+tmp/
+
+# Local service data
+data/
+.data/
+
+# Frontend
+node_modules/
+web/dist/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+AGENTS.md
