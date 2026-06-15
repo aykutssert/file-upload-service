@@ -1,4 +1,4 @@
-.PHONY: check fmt fmt-check test test-race vet
+.PHONY: check db-down db-migrate db-up fmt fmt-check test test-race vet
 
 check: fmt-check vet test test-race
 
@@ -17,3 +17,15 @@ test:
 
 test-race:
 	@if go list ./... 2>/dev/null | grep -q .; then go test -race ./...; fi
+
+db-up:
+	docker compose up -d --wait postgres
+
+db-down:
+	docker compose down
+
+db-migrate:
+	go run github.com/pressly/goose/v3/cmd/goose@v3.27.1 \
+		-dir migrations postgres \
+		"$${UPLOAD_API_DATABASE_URL:-postgres://file_upload:local-development-only@127.0.0.1:5432/file_upload?sslmode=disable}" \
+		up
