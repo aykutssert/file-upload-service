@@ -265,3 +265,115 @@ test to leave the schema clean.
   traversed by the API; async workers are added in v0.4.
 - NATS is present and healthy but not used in v0.2.
 - The platform proves local behavior, not cloud durability or availability.
+
+---
+
+# v0.3 — Multipart Upload and Resume
+
+## Overview
+
+v0.3 adds server-side multipart upload sessions backed by S3 multipart upload
+API. Large files are split into parts by the client; each part is uploaded
+directly to SeaweedFS via a short-lived presigned PUT URL. The API orchestrates
+session state and part metadata but never transfers file bytes.
+
+## Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | /v1/multipart-sessions | Create session; returns session ID |
+| GET | /v1/multipart-sessions/{id}/parts/{n}?size=N | Presign part N upload URL |
+| POST | /v1/multipart-sessions/{id}/parts/{n} | Confirm part N (ETag + size) |
+| GET | /v1/multipart-sessions/{id}/parts | List confirmed parts |
+| POST | /v1/multipart-sessions/{id}/complete | Finalize; creates file record |
+| DELETE | /v1/multipart-sessions/{id} | Abort and clean up |
+
+All six require `file:create` permission. Completed sessions appear in the
+standard `GET /v1/files` listing.
+
+## Schema
+
+`multipart_uploads` stores session state. `multipart_parts` stores confirmed
+part ETags. Constraints enforce:
+
+- `part_size >= 5242880` (S3 minimum 5 MiB per part)
+- `part_number` between 1 and 10000
+- `status IN ('pending','completed','aborted')`
+- Check constraint: `completed_at NOT NULL` when `status='completed'`, and
+  `aborted_at NOT NULL` when `status='aborted'`
+- Composite FK `(tenant_id, owner_principal_id)` references `principals`
+- Unique `(tenant_id, owner_principal_id, idempotency_key)` prevents duplicate
+  sessions
+
+On complete, a record is inserted into `files` with `status='ready'` using the
+multipart session ID as the idempotency key. This makes completed multipart
+files visible through the standard file list and download endpoints.
+
+## Session State Machine
+
+```
+pending ──complete──> completed
+pending ──abort────> aborted
+```
+
+`FindMultipartSession` filters out `aborted` sessions. Both `complete` and
+`abort` are naturally idempotent: repeated calls return the current state
+without side effects.
+
+## Part Lifecycle
+
+1. Client calls `GET /v1/multipart-sessions/{id}/parts/{n}?size=N` to receive
+   a presigned PUT URL.
+2. Client uploads the part bytes directly to SeaweedFS and receives an ETag in
+   the response.
+3. Client calls `POST /v1/multipart-sessions/{id}/parts/{n}` with the ETag and
+   size to confirm the part.
+4. `AddPart` uses `ON CONFLICT (multipart_upload_id, part_number) DO UPDATE`
+   to mirror S3 semantics: re-uploading a part replaces the previous ETag.
+
+## Memory Benchmark
+
+File bytes never flow through the API. Allocations per request are constant
+with respect to file size.
+
+```
+BenchmarkCreateMultipartSession_1MB-10     259490    4429 ns/op    8109 B/op    38 allocs/op
+BenchmarkCreateMultipartSession_10GB-10    263342    4459 ns/op    8125 B/op    38 allocs/op
+BenchmarkConfirmPart-10                    438008    2693 ns/op    7383 B/op    36 allocs/op
+```
+
+The 16-byte difference between the 1 MB and 10 GB session benchmarks is the
+JSON integer representation of `expected_size`. Allocation count is identical.
+A session for a 10 GB file uses the same handler memory as a session for a
+1 MB file.
+
+Benchmarks run on Apple M4, Go 1.26, `go test -bench -benchmem -count=3`.
+
+## Known Limitations
+
+- **Orphan S3 uploads on idempotent create**: when a `POST /v1/multipart-sessions`
+  is retried with the same idempotency key, `CreateMultipartUpload` is called
+  before the DB conflict is detected. The new S3 multipart upload is abandoned.
+  A cleanup sweep is planned for v0.6.
+- **Non-atomic S3 + DB complete**: if the process crashes between
+  `CompleteMultipartUpload` (S3) and the DB update, the next retry detects
+  `ErrMultipartUploadNotFound` and skips the S3 call, but a duplicate INSERT
+  into `files` will fail. Recovery is planned for v0.6.
+- Part size minimum is enforced in the DB schema (5 MiB). The last part may be
+  smaller; clients provide the actual size via the `?size=` query parameter.
+- Resume across session restarts is supported: `GET /v1/multipart-sessions/{id}/parts`
+  returns all confirmed parts so the client can skip already-uploaded parts.
+
+## Verified Behavior
+
+- Session create returns 201 on first call, 200 with `reused:true` on retry.
+- Cross-tenant session access is rejected at every endpoint.
+- Part confirm with wrong session owner returns 404.
+- Re-confirming a part with a new ETag updates the stored ETag (S3 semantics).
+- Complete with zero confirmed parts returns 409.
+- Complete on an already-completed session returns 200 with the existing file ID.
+- Abort on a missing or already-aborted session returns 204.
+- Abort on a completed session returns 409.
+- `gofmt`, `go vet`, `go test ./...`, `go test -race ./...` pass.
+- PostgreSQL integration tests: full session lifecycle, abort lifecycle,
+  cross-tenant isolation, part deduplication.
