@@ -1,5 +1,7 @@
 # File Upload Service
 
+![Architecture](design.png)
+
 A production-oriented large-file upload and processing platform built as a
 versioned backend engineering project.
 
