@@ -31,6 +31,8 @@ func TestLiveness(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 
 	response := request(t, router, "/health/live")
@@ -39,7 +41,7 @@ func TestLiveness(t *testing.T) {
 }
 
 func TestReadinessAvailable(t *testing.T) {
-	router := NewRouter(stubReadinessChecker{}, nil, nil, nil, nil, nil)
+	router := NewRouter(stubReadinessChecker{}, nil, nil, nil, nil, nil, nil, nil)
 
 	response := request(t, router, "/health/ready")
 
@@ -49,6 +51,8 @@ func TestReadinessAvailable(t *testing.T) {
 func TestReadinessUnavailable(t *testing.T) {
 	router := NewRouter(
 		stubReadinessChecker{err: errors.New("database down")},
+		nil,
+		nil,
 		nil,
 		nil,
 		nil,
@@ -87,7 +91,7 @@ func TestCreateUploadSession(t *testing.T) {
 			CreatedAt:    time.Now(),
 		},
 	}
-	router := NewRouter(stubReadinessChecker{}, resolver, creator, stubUploadPresigner{}, nil, nil)
+	router := NewRouter(stubReadinessChecker{}, resolver, creator, stubUploadPresigner{}, nil, nil, nil, nil)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/upload-sessions",
@@ -141,6 +145,8 @@ func TestCreateUploadSessionRejectsMissingIdempotencyKey(t *testing.T) {
 		stubUploadPresigner{},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -163,6 +169,8 @@ func TestCreateUploadSessionRejectsMissingPermission(t *testing.T) {
 		&stubResolver{principal: auth.Principal{ID: "principal-id", TenantID: "tenant-id"}},
 		&stubUploadCreator{},
 		stubUploadPresigner{},
+		nil,
+		nil,
 		nil,
 		nil,
 	)
@@ -188,6 +196,8 @@ func TestCreateUploadSessionReportsIdempotencyConflict(t *testing.T) {
 		&stubResolver{principal: principalWithPermission()},
 		&stubUploadCreator{err: files.ErrIdempotencyConflict},
 		stubUploadPresigner{},
+		nil,
+		nil,
 		nil,
 		nil,
 	)
@@ -240,6 +250,8 @@ func TestCompleteUpload(t *testing.T) {
 		},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -288,6 +300,8 @@ func TestCompleteUploadIdempotent(t *testing.T) {
 		stubUploadPresigner{},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -331,6 +345,8 @@ func TestCompleteUploadRejectsMissingObject(t *testing.T) {
 		stubUploadPresigner{headErr: storage.ErrObjectNotFound},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -368,6 +384,8 @@ func TestCompleteUploadRejectsMetadataMismatch(t *testing.T) {
 		},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -398,6 +416,8 @@ func TestCompleteUploadRejectsStateConflict(t *testing.T) {
 			},
 		},
 		stubUploadPresigner{},
+		nil,
+		nil,
 		nil,
 		nil,
 	)
@@ -431,6 +451,8 @@ func TestDownloadReadyFile(t *testing.T) {
 			},
 		},
 		stubUploadPresigner{},
+		nil,
+		nil,
 		nil,
 		nil,
 	)
@@ -470,6 +492,8 @@ func TestDownloadRejectsMissingReadPermission(t *testing.T) {
 		stubUploadPresigner{},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -500,6 +524,8 @@ func TestDownloadRejectsFileThatIsNotReady(t *testing.T) {
 			},
 		},
 		stubUploadPresigner{},
+		nil,
+		nil,
 		nil,
 		nil,
 	)
@@ -543,6 +569,8 @@ func TestListUploads(t *testing.T) {
 		stubUploadPresigner{},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -580,6 +608,8 @@ func TestListUploadsRejectsMissingReadPermission(t *testing.T) {
 		stubUploadPresigner{},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(http.MethodGet, "/v1/files", nil)
 	request.Header.Set("Authorization", "Bearer secret-key")
@@ -598,6 +628,8 @@ func TestListUploadsRejectsInvalidLimit(t *testing.T) {
 		&stubResolver{principal: principalWithReadPermission()},
 		&stubUploadCreator{},
 		stubUploadPresigner{},
+		nil,
+		nil,
 		nil,
 		nil,
 	)
@@ -813,6 +845,8 @@ func TestDeleteUpload(t *testing.T) {
 		stubUploadPresigner{},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/files/file-id", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -839,6 +873,8 @@ func TestDeleteUploadRejectsMissingPermission(t *testing.T) {
 		stubUploadPresigner{},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/files/file-id", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -859,6 +895,8 @@ func TestDeleteUploadRejectsNonReadyFile(t *testing.T) {
 		stubUploadPresigner{},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/files/file-id", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -877,6 +915,8 @@ func TestDeleteUploadReturnsNotFound(t *testing.T) {
 		&stubResolver{principal: principalWithDeletePermission()},
 		&stubUploadCreator{findErr: files.ErrUploadNotFound},
 		stubUploadPresigner{},
+		nil,
+		nil,
 		nil,
 		nil,
 	)
@@ -903,6 +943,8 @@ func TestBatchLookup(t *testing.T) {
 		&stubResolver{principal: principalWithReadPermission()},
 		uploads,
 		stubUploadPresigner{},
+		nil,
+		nil,
 		nil,
 		nil,
 	)
@@ -936,6 +978,8 @@ func TestBatchLookupRejectsMissingPermission(t *testing.T) {
 		stubUploadPresigner{},
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -958,6 +1002,8 @@ func TestBatchLookupRejectsEmptyIDs(t *testing.T) {
 		&stubResolver{principal: principalWithReadPermission()},
 		&stubUploadCreator{},
 		stubUploadPresigner{},
+		nil,
+		nil,
 		nil,
 		nil,
 	)
@@ -993,6 +1039,8 @@ func TestCreateKey(t *testing.T) {
 		stubUploadPresigner{},
 		creator,
 		&stubKeyRevoker{},
+		nil,
+		nil,
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -1030,6 +1078,8 @@ func TestCreateKeyRejectsInvalidExpiration(t *testing.T) {
 		stubUploadPresigner{},
 		&stubKeyCreator{err: auth.ErrInvalidAPIKeyExpiration},
 		&stubKeyRevoker{},
+		nil,
+		nil,
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -1055,6 +1105,8 @@ func TestRevokeKey(t *testing.T) {
 		stubUploadPresigner{},
 		&stubKeyCreator{},
 		revoker,
+		nil,
+		nil,
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/keys/key-id", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -1078,6 +1130,8 @@ func TestRevokeKeyNotFound(t *testing.T) {
 		stubUploadPresigner{},
 		&stubKeyCreator{},
 		&stubKeyRevoker{err: auth.ErrAPIKeyNotFound},
+		nil,
+		nil,
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/keys/other-tenant-key", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")

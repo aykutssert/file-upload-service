@@ -65,6 +65,8 @@ func main() {
 			presigner,
 			auth.NewKeyCreator(pool),
 			auth.NewKeyRevoker(pool),
+			files.NewMultipartRepository(pool),
+			presigner,
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
