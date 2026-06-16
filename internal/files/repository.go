@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,15 +21,25 @@ import (
 var (
 	ErrIdempotencyConflict = errors.New("idempotency key already used with different request")
 	ErrInvalidUpload       = errors.New("invalid upload request")
+	ErrUploadNotFound      = errors.New("upload not found")
+	ErrUploadStateConflict = errors.New("upload state conflict")
+	ErrInvalidListRequest  = errors.New("invalid list request")
 )
 
 type QueryRower interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+type Queryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
 type Repository struct {
-	database QueryRower
-	random   io.Reader
+	database interface {
+		QueryRower
+		Queryer
+	}
+	random io.Reader
 }
 
 type CreateUploadInput struct {
@@ -48,10 +60,32 @@ type Upload struct {
 	ExpectedSize     int64
 	Status           string
 	CreatedAt        time.Time
+	UploadedAt       *time.Time
 	Reused           bool
 }
 
-func NewRepository(database QueryRower) *Repository {
+type ListUploadsInput struct {
+	Principal        auth.Principal
+	OwnerPrincipalID string
+	Status           string
+	Limit            int
+	Cursor           string
+}
+
+type ListUploadsResult struct {
+	Uploads    []Upload
+	NextCursor string
+}
+
+type listCursor struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+}
+
+func NewRepository(database interface {
+	QueryRower
+	Queryer
+}) *Repository {
 	return &Repository{
 		database: database,
 		random:   rand.Reader,
@@ -167,6 +201,279 @@ func (repository *Repository) CreateUpload(
 	}
 
 	return upload, nil
+}
+
+func (repository *Repository) FindUpload(
+	ctx context.Context,
+	principal auth.Principal,
+	fileID string,
+) (Upload, error) {
+	fileID = strings.TrimSpace(fileID)
+	if principal.ID == "" || principal.TenantID == "" || fileID == "" {
+		return Upload{}, ErrInvalidUpload
+	}
+
+	upload, err := repository.queryUpload(ctx, `
+		SELECT
+			id::text,
+			tenant_id::text,
+			owner_principal_id::text,
+			object_key,
+			original_name,
+			content_type,
+			expected_size,
+			status,
+			created_at,
+			uploaded_at
+		FROM files
+		WHERE id = $1
+			AND tenant_id = $2
+			AND owner_principal_id = $3
+	`, fileID, principal.TenantID, principal.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Upload{}, ErrUploadNotFound
+	}
+	return upload, err
+}
+
+func (repository *Repository) MarkUploaded(
+	ctx context.Context,
+	principal auth.Principal,
+	fileID string,
+) (Upload, error) {
+	fileID = strings.TrimSpace(fileID)
+	if principal.ID == "" || principal.TenantID == "" || fileID == "" {
+		return Upload{}, ErrInvalidUpload
+	}
+
+	upload, err := repository.queryUpload(ctx, `
+		UPDATE files
+		SET
+			status = 'uploaded',
+			uploaded_at = now(),
+			updated_at = now()
+		WHERE id = $1
+			AND tenant_id = $2
+			AND owner_principal_id = $3
+			AND status = 'pending'
+		RETURNING
+			id::text,
+			tenant_id::text,
+			owner_principal_id::text,
+			object_key,
+			original_name,
+			content_type,
+			expected_size,
+			status,
+			created_at,
+			uploaded_at
+	`, fileID, principal.TenantID, principal.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Upload{}, ErrUploadStateConflict
+	}
+	return upload, err
+}
+
+func (repository *Repository) ListUploads(
+	ctx context.Context,
+	input ListUploadsInput,
+) (ListUploadsResult, error) {
+	input.OwnerPrincipalID = strings.TrimSpace(input.OwnerPrincipalID)
+	input.Status = strings.TrimSpace(input.Status)
+	input.Cursor = strings.TrimSpace(input.Cursor)
+
+	if input.Principal.TenantID == "" ||
+		(input.OwnerPrincipalID != "" && !isUUID(input.OwnerPrincipalID)) ||
+		(input.Status != "" && !isValidStatus(input.Status)) ||
+		input.Limit < 1 ||
+		input.Limit > 100 {
+		return ListUploadsResult{}, ErrInvalidListRequest
+	}
+
+	var cursor listCursor
+	if input.Cursor != "" {
+		var err error
+		cursor, err = decodeListCursor(input.Cursor)
+		if err != nil {
+			return ListUploadsResult{}, ErrInvalidListRequest
+		}
+	}
+
+	rows, err := repository.database.Query(ctx, `
+		SELECT
+			id::text,
+			tenant_id::text,
+			owner_principal_id::text,
+			object_key,
+			original_name,
+			content_type,
+			expected_size,
+			status,
+			created_at,
+			uploaded_at
+		FROM files
+		WHERE tenant_id = $1
+			AND ($2::uuid IS NULL OR owner_principal_id = $2)
+			AND ($3::text IS NULL OR status = $3)
+			AND (
+				$4::timestamptz IS NULL
+				OR (created_at, id) < ($4, $5::uuid)
+			)
+		ORDER BY created_at DESC, id DESC
+		LIMIT $6
+	`,
+		input.Principal.TenantID,
+		nullableString(input.OwnerPrincipalID),
+		nullableString(input.Status),
+		nullableTime(cursor.CreatedAt),
+		nullableString(cursor.ID),
+		input.Limit+1,
+	)
+	if err != nil {
+		return ListUploadsResult{}, err
+	}
+	defer rows.Close()
+
+	uploads := make([]Upload, 0, input.Limit)
+	for rows.Next() {
+		upload, err := scanUpload(rows)
+		if err != nil {
+			return ListUploadsResult{}, err
+		}
+		uploads = append(uploads, upload)
+	}
+	if err := rows.Err(); err != nil {
+		return ListUploadsResult{}, err
+	}
+
+	result := ListUploadsResult{Uploads: uploads}
+	if len(result.Uploads) > input.Limit {
+		next := result.Uploads[input.Limit-1]
+		result.Uploads = result.Uploads[:input.Limit]
+		nextCursor, err := encodeListCursor(listCursor{
+			CreatedAt: next.CreatedAt,
+			ID:        next.ID,
+		})
+		if err != nil {
+			return ListUploadsResult{}, err
+		}
+		result.NextCursor = nextCursor
+	}
+
+	return result, nil
+}
+
+func (repository *Repository) queryUpload(
+	ctx context.Context,
+	sql string,
+	args ...any,
+) (Upload, error) {
+	var upload Upload
+	err := repository.database.QueryRow(ctx, sql, args...).Scan(
+		&upload.ID,
+		&upload.TenantID,
+		&upload.OwnerPrincipalID,
+		&upload.ObjectKey,
+		&upload.OriginalName,
+		&upload.ContentType,
+		&upload.ExpectedSize,
+		&upload.Status,
+		&upload.CreatedAt,
+		&upload.UploadedAt,
+	)
+	return upload, err
+}
+
+type uploadScanner interface {
+	Scan(...any) error
+}
+
+func scanUpload(scanner uploadScanner) (Upload, error) {
+	var upload Upload
+	err := scanner.Scan(
+		&upload.ID,
+		&upload.TenantID,
+		&upload.OwnerPrincipalID,
+		&upload.ObjectKey,
+		&upload.OriginalName,
+		&upload.ContentType,
+		&upload.ExpectedSize,
+		&upload.Status,
+		&upload.CreatedAt,
+		&upload.UploadedAt,
+	)
+	return upload, err
+}
+
+func encodeListCursor(cursor listCursor) (string, error) {
+	encoded, err := json.Marshal(cursor)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(encoded), nil
+}
+
+func decodeListCursor(value string) (listCursor, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return listCursor{}, err
+	}
+	var cursor listCursor
+	if err := json.Unmarshal(decoded, &cursor); err != nil {
+		return listCursor{}, err
+	}
+	if cursor.CreatedAt.IsZero() || !isUUID(strings.TrimSpace(cursor.ID)) {
+		return listCursor{}, ErrInvalidListRequest
+	}
+	return cursor, nil
+}
+
+func isValidStatus(status string) bool {
+	switch status {
+	case "pending", "uploaded", "processing", "ready", "rejected", "deleted":
+		return true
+	default:
+		return false
+	}
+}
+
+func isUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for index, character := range value {
+		switch index {
+		case 8, 13, 18, 23:
+			if character != '-' {
+				return false
+			}
+		default:
+			if !isHex(character) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isHex(character rune) bool {
+	return (character >= '0' && character <= '9') ||
+		(character >= 'a' && character <= 'f') ||
+		(character >= 'A' && character <= 'F')
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value
 }
 
 func (repository *Repository) objectKey(tenantID string) (string, error) {
