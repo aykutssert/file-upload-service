@@ -344,6 +344,42 @@ Completion criteria:
 - Failed jobs reach a visible terminal state after bounded retries.
 - Dead-letter jobs can be inspected and replayed deliberately.
 
+## v0.4.1 - Pending Session Cleanup
+
+Remove stale multipart sessions and their orphaned S3 objects.
+
+Background: multipart sessions that are initiated but never completed leave two
+types of garbage — a row in PostgreSQL and an in-progress multipart upload in
+SeaweedFS. SeaweedFS does not automatically abort incomplete multipart uploads,
+so without cleanup, storage fills with orphaned parts indefinitely.
+
+Scope:
+
+- Background worker that scans for multipart sessions in `pending` status older
+  than a configurable threshold (default 24 hours)
+- Call `AbortMultipartUpload` against SeaweedFS for each stale session to release
+  object-store parts
+- Transition the session row to `abandoned` status after successful abort
+- Handle abort failures gracefully: retry with exponential backoff, record a
+  `cleanup_attempted_at` timestamp on the row
+- Detect orphaned S3 multipart uploads that have no corresponding session row
+- Configurable thresholds: session age limit, cleanup interval, per-run batch size
+- Metrics: sessions abandoned, S3 parts freed, cleanup failures
+
+State transition:
+
+```text
+pending (age > threshold) -> abandoned
+```
+
+Completion criteria:
+
+- A session older than the threshold is cleaned up in the next cleanup run.
+- Aborting an already-aborted S3 upload does not produce an error.
+- A partially failed run leaves already-cleaned sessions in `abandoned`.
+- Storage usage drops measurably after a cleanup run on seeded stale data.
+- Cleanup never touches sessions in `completed` or `aborted` status.
+
 ## v0.5 - Rich Media Processing
 
 Add pluggable processing for common product workloads.
