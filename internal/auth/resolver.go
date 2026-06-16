@@ -40,6 +40,7 @@ func (resolver *PostgreSQLResolver) Resolve(
 		WITH candidate AS MATERIALIZED (
 			SELECT
 				api_keys.id,
+				principals.id AS principal_id,
 				principals.tenant_id,
 				principals.external_id,
 				principals.principal_type,
@@ -66,6 +67,7 @@ func (resolver *PostgreSQLResolver) Resolve(
 				)
 		)
 		SELECT
+			principal_id::text,
 			tenant_id::text,
 			external_id,
 			principal_type,
@@ -73,6 +75,7 @@ func (resolver *PostgreSQLResolver) Resolve(
 			permissions
 		FROM candidate
 	`, keyHash[:]).Scan(
+		&principal.ID,
 		&principal.TenantID,
 		&principal.SubjectID,
 		&principalType,

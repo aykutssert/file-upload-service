@@ -8,6 +8,7 @@ const (
 )
 
 type Principal struct {
+	ID          string
 	TenantID    string
 	SubjectID   string
 	Type        PrincipalType

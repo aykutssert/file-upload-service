@@ -10,11 +10,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aykutssert/file-upload-service/internal/auth"
 	"github.com/aykutssert/file-upload-service/internal/config"
 	"github.com/aykutssert/file-upload-service/internal/database"
+	"github.com/aykutssert/file-upload-service/internal/files"
 	"github.com/aykutssert/file-upload-service/internal/httpapi"
 	"github.com/aykutssert/file-upload-service/internal/httpserver"
 	"github.com/aykutssert/file-upload-service/internal/readiness"
+	"github.com/aykutssert/file-upload-service/internal/storage"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -40,9 +43,27 @@ func main() {
 		readiness.NewHTTPChecker(http.DefaultClient, cfg.SeaweedFSHealthURL),
 		readiness.NewHTTPChecker(http.DefaultClient, cfg.NATSHealthURL),
 	)
+	presigner, err := storage.NewPresigner(storage.Config{
+		AccessKey: cfg.SeaweedFSAccessKey,
+		Bucket:    cfg.SeaweedFSBucket,
+		Endpoint:  cfg.SeaweedFSS3URL,
+		ExpiresIn: time.Duration(cfg.PresignTTLSeconds) * time.Second,
+		PublicURL: cfg.SeaweedFSPublicURL,
+		Region:    cfg.SeaweedFSRegion,
+		SecretKey: cfg.SeaweedFSSecretKey,
+	})
+	if err != nil {
+		logger.Error("create storage presigner", "error", err)
+		os.Exit(1)
+	}
 
 	server := &http.Server{
-		Handler:           httpapi.NewRouter(checker),
+		Handler: httpapi.NewRouter(
+			checker,
+			auth.NewPostgreSQLResolver(pool),
+			files.NewRepository(pool),
+			presigner,
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

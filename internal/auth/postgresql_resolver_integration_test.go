@@ -79,6 +79,9 @@ func TestPostgreSQLResolverIntegration(t *testing.T) {
 	if principal.TenantID != tenantID {
 		t.Fatalf("TenantID = %q", principal.TenantID)
 	}
+	if principal.ID != principalID {
+		t.Fatalf("ID = %q", principal.ID)
+	}
 	if principal.SubjectID != "integration-user" {
 		t.Fatalf("SubjectID = %q", principal.SubjectID)
 	}
@@ -265,5 +268,107 @@ func TestKeyCreatorIntegration(t *testing.T) {
 	_, err = creator.Create(ctx, principalID, nil)
 	if !errors.Is(err, ErrPrincipalNotFound) {
 		t.Fatalf("disabled principal error = %v", err)
+	}
+}
+
+func TestKeyRevokerIntegration(t *testing.T) {
+	databaseURL := os.Getenv("UPLOAD_API_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("UPLOAD_API_TEST_DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open database pool: %v", err)
+	}
+	defer pool.Close()
+
+	transaction, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	defer func() {
+		_ = transaction.Rollback(ctx)
+	}()
+
+	var tenantID string
+	err = transaction.QueryRow(ctx, `
+		INSERT INTO tenants (name)
+		VALUES ('Revoker Integration Tenant')
+		RETURNING id::text
+	`).Scan(&tenantID)
+	if err != nil {
+		t.Fatalf("insert tenant: %v", err)
+	}
+
+	var otherTenantID string
+	err = transaction.QueryRow(ctx, `
+		INSERT INTO tenants (name)
+		VALUES ('Revoker Other Tenant')
+		RETURNING id::text
+	`).Scan(&otherTenantID)
+	if err != nil {
+		t.Fatalf("insert other tenant: %v", err)
+	}
+
+	var principalID string
+	err = transaction.QueryRow(ctx, `
+		INSERT INTO principals (
+			tenant_id,
+			external_id,
+			principal_type,
+			role
+		)
+		VALUES ($1, 'revoker-user', 'user', 'member')
+		RETURNING id::text
+	`, tenantID).Scan(&principalID)
+	if err != nil {
+		t.Fatalf("insert principal: %v", err)
+	}
+
+	rawKey := "revoker-integration-key"
+	keyHash := sha256.Sum256([]byte(rawKey))
+	var keyID string
+	err = transaction.QueryRow(ctx, `
+		INSERT INTO api_keys (principal_id, key_prefix, key_hash)
+		VALUES ($1, 'fus_revoke', $2)
+		RETURNING id::text
+	`, principalID, keyHash[:]).Scan(&keyID)
+	if err != nil {
+		t.Fatalf("insert API key: %v", err)
+	}
+
+	resolver := NewPostgreSQLResolver(transaction)
+	_, err = resolver.Resolve(ctx, rawKey)
+	if err != nil {
+		t.Fatalf("resolve active key before revocation: %v", err)
+	}
+
+	revoker := NewKeyRevoker(transaction)
+
+	err = revoker.Revoke(ctx, keyID, otherTenantID)
+	if !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Fatalf("cross-tenant revocation error = %v", err)
+	}
+
+	_, err = resolver.Resolve(ctx, rawKey)
+	if err != nil {
+		t.Fatalf("key must still be active after failed cross-tenant revocation: %v", err)
+	}
+
+	err = revoker.Revoke(ctx, keyID, tenantID)
+	if err != nil {
+		t.Fatalf("revoke API key: %v", err)
+	}
+
+	_, err = resolver.Resolve(ctx, rawKey)
+	if !errors.Is(err, ErrInvalidAPIKey) {
+		t.Fatalf("revoked key error = %v", err)
+	}
+
+	err = revoker.Revoke(ctx, keyID, tenantID)
+	if !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Fatalf("already-revoked key error = %v", err)
 	}
 }

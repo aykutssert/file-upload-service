@@ -14,6 +14,7 @@ func TestPostgreSQLResolverResolvesActiveKey(t *testing.T) {
 	database := &resolverDatabase{
 		row: resolverRow{
 			values: []any{
+				"principal-id",
 				"tenant-a",
 				"user-a",
 				"user",
@@ -38,6 +39,9 @@ func TestPostgreSQLResolverResolvesActiveKey(t *testing.T) {
 	}
 	if principal.TenantID != "tenant-a" {
 		t.Fatalf("TenantID = %q", principal.TenantID)
+	}
+	if principal.ID != "principal-id" {
+		t.Fatalf("ID = %q", principal.ID)
 	}
 	if principal.SubjectID != "user-a" {
 		t.Fatalf("SubjectID = %q", principal.SubjectID)

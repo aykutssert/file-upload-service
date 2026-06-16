@@ -77,7 +77,12 @@ jobs:
       - name: Verify PostgreSQL API key resolver
         env:
           UPLOAD_API_TEST_DATABASE_URL: postgres://file_upload:local-development-only@127.0.0.1:5432/file_upload?sslmode=disable
-        run: go test ./internal/auth -run 'PostgreSQLResolverIntegration|KeyCreatorIntegration'
+        run: go test ./internal/auth -run 'PostgreSQLResolverIntegration|KeyCreatorIntegration|KeyRevokerIntegration'
+
+      - name: Verify upload repository
+        env:
+          UPLOAD_API_TEST_DATABASE_URL: postgres://file_upload:local-development-only@127.0.0.1:5432/file_upload?sslmode=disable
+        run: go test ./internal/files -run RepositoryCreateUploadIntegration
 
       - name: Verify health endpoints
         run: |

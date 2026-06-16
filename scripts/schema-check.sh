@@ -96,6 +96,8 @@ INSERT INTO files (
     expected_size,
     status,
     checksum,
+    idempotency_key,
+    create_request_hash,
     uploaded_at,
     ready_at
 )
@@ -108,6 +110,8 @@ SELECT
     0,
     'ready',
     decode(repeat('cd', 32), 'hex'),
+    'files-schema-ready',
+    decode(repeat('ef', 32), 'hex'),
     now(),
     now()
 FROM principal;
@@ -139,7 +143,9 @@ INSERT INTO files (
     original_name,
     content_type,
     expected_size,
-    status
+    status,
+    idempotency_key,
+    create_request_hash
 )
 SELECT
     tenant_id,
@@ -148,7 +154,9 @@ SELECT
     'document.pdf',
     'application/pdf',
     1048576,
-    'unknown'
+    'unknown',
+    'invalid-status',
+    decode(repeat('ef', 32), 'hex')
 FROM principal;
 ROLLBACK;
 SQL
@@ -182,7 +190,9 @@ INSERT INTO files (
     original_name,
     content_type,
     expected_size,
-    checksum
+    checksum,
+    idempotency_key,
+    create_request_hash
 )
 SELECT
     tenant_id,
@@ -191,7 +201,9 @@ SELECT
     'document.pdf',
     'application/pdf',
     1048576,
-    decode('cd', 'hex')
+    decode('cd', 'hex'),
+    'invalid-checksum',
+    decode(repeat('ef', 32), 'hex')
 FROM principal;
 ROLLBACK;
 SQL
@@ -224,7 +236,9 @@ INSERT INTO files (
     object_key,
     original_name,
     content_type,
-    expected_size
+    expected_size,
+    idempotency_key,
+    create_request_hash
 )
 SELECT
     tenant_id,
@@ -232,7 +246,9 @@ SELECT
     'tenants/invalid-size/objects/' || gen_random_uuid()::text,
     'document.pdf',
     'application/pdf',
-    -1
+    -1,
+    'invalid-size',
+    decode(repeat('ef', 32), 'hex')
 FROM principal;
 ROLLBACK;
 SQL
@@ -270,7 +286,9 @@ INSERT INTO files (
     object_key,
     original_name,
     content_type,
-    expected_size
+    expected_size,
+    idempotency_key,
+    create_request_hash
 )
 SELECT
     second_tenant.id,
@@ -278,7 +296,9 @@ SELECT
     'tenants/cross-tenant/objects/' || gen_random_uuid()::text,
     'document.pdf',
     'application/pdf',
-    1
+    1,
+    'cross-tenant-owner',
+    decode(repeat('ef', 32), 'hex')
 FROM second_tenant, principal;
 ROLLBACK;
 SQL
@@ -313,6 +333,8 @@ INSERT INTO files (
     content_type,
     expected_size,
     status,
+    idempotency_key,
+    create_request_hash,
     uploaded_at
 )
 SELECT
@@ -323,6 +345,8 @@ SELECT
     'application/pdf',
     1048576,
     'ready',
+    'invalid-state',
+    decode(repeat('ef', 32), 'hex'),
     now()
 FROM principal;
 ROLLBACK;

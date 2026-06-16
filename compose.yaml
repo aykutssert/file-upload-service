@@ -7,7 +7,14 @@ services:
       UPLOAD_API_HOST: 0.0.0.0
       UPLOAD_API_NATS_HEALTH_URL: http://nats:8222/healthz
       UPLOAD_API_PORT: 8080
+      UPLOAD_API_PRESIGN_TTL_SECONDS: 900
+      UPLOAD_API_SEAWEEDFS_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:-local-access-key}
+      UPLOAD_API_SEAWEEDFS_BUCKET: ${SEAWEEDFS_BUCKET:-file-upload}
       UPLOAD_API_SEAWEEDFS_HEALTH_URL: http://seaweedfs:9333/cluster/status
+      UPLOAD_API_SEAWEEDFS_PUBLIC_URL: http://127.0.0.1:8333
+      UPLOAD_API_SEAWEEDFS_REGION: local
+      UPLOAD_API_SEAWEEDFS_S3_URL: http://seaweedfs:8333
+      UPLOAD_API_SEAWEEDFS_SECRET_KEY: ${SEAWEEDFS_SECRET_KEY:-local-secret-key}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
