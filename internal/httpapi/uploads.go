@@ -22,7 +22,9 @@ type uploadCreator interface {
 	CreateUpload(context.Context, files.CreateUploadInput) (files.Upload, error)
 	FindUpload(context.Context, auth.Principal, string) (files.Upload, error)
 	ListUploads(context.Context, files.ListUploadsInput) (files.ListUploadsResult, error)
-	MarkUploaded(context.Context, auth.Principal, string) (files.Upload, error)
+	MarkReady(context.Context, auth.Principal, string) (files.Upload, error)
+	DeleteUpload(context.Context, auth.Principal, string) error
+	GetUploads(context.Context, auth.Principal, []string) ([]files.Upload, error)
 }
 
 type uploadPresigner interface {
@@ -202,6 +204,18 @@ func completeUploadHandler(uploads uploadCreator, objectStore uploadPresigner) h
 			writeError(w, http.StatusInternalServerError, "internal_error", "request failed")
 			return
 		}
+		// Natural idempotency: if already completed, return current state.
+		if upload.Status == "ready" {
+			writeJSON(w, http.StatusOK, completeUploadResponse{
+				ID:           upload.ID,
+				ObjectKey:    upload.ObjectKey,
+				OriginalName: upload.OriginalName,
+				ContentType:  upload.ContentType,
+				ExpectedSize: upload.ExpectedSize,
+				Status:       upload.Status,
+			})
+			return
+		}
 		if upload.Status != "pending" {
 			writeError(
 				w,
@@ -240,7 +254,7 @@ func completeUploadHandler(uploads uploadCreator, objectStore uploadPresigner) h
 			return
 		}
 
-		upload, err = uploads.MarkUploaded(request.Context(), principal, upload.ID)
+		upload, err = uploads.MarkReady(request.Context(), principal, upload.ID)
 		if errors.Is(err, files.ErrUploadStateConflict) {
 			writeError(
 				w,
@@ -382,6 +396,112 @@ func newFileResponse(upload files.Upload) fileResponse {
 		response.UploadedAt = upload.UploadedAt.Format(timeFormat)
 	}
 	return response
+}
+
+func deleteUploadHandler(uploads uploadCreator) http.HandlerFunc {
+	return func(w http.ResponseWriter, request *http.Request) {
+		principal, ok := auth.PrincipalFromContext(request.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "valid API key required")
+			return
+		}
+
+		fileID := strings.TrimSpace(chi.URLParam(request, "id"))
+		upload, err := uploads.FindUpload(request.Context(), principal, fileID)
+		if errors.Is(err, files.ErrInvalidUpload) {
+			writeError(w, http.StatusBadRequest, "invalid_upload", "file request is invalid")
+			return
+		}
+		if errors.Is(err, files.ErrUploadNotFound) {
+			writeError(w, http.StatusNotFound, "file_not_found", "file was not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "request failed")
+			return
+		}
+		if upload.Status != "ready" {
+			writeError(
+				w,
+				http.StatusConflict,
+				"file_not_ready",
+				"only ready files can be deleted",
+			)
+			return
+		}
+
+		err = uploads.DeleteUpload(request.Context(), principal, upload.ID)
+		if errors.Is(err, files.ErrUploadStateConflict) {
+			writeError(
+				w,
+				http.StatusConflict,
+				"file_not_ready",
+				"only ready files can be deleted",
+			)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "request failed")
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+type batchLookupRequest struct {
+	IDs []string `json:"ids"`
+}
+
+type batchLookupResponse struct {
+	Files []fileResponse `json:"files"`
+}
+
+const maxBatchSize = 100
+
+func batchLookupHandler(uploads uploadCreator) http.HandlerFunc {
+	return func(w http.ResponseWriter, request *http.Request) {
+		principal, ok := auth.PrincipalFromContext(request.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "valid API key required")
+			return
+		}
+
+		var body batchLookupRequest
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json", "request body is invalid")
+			return
+		}
+		if len(body.IDs) == 0 || len(body.IDs) > maxBatchSize {
+			writeError(
+				w,
+				http.StatusBadRequest,
+				"invalid_batch_request",
+				"ids must contain between 1 and 100 entries",
+			)
+			return
+		}
+
+		found, err := uploads.GetUploads(request.Context(), principal, body.IDs)
+		if errors.Is(err, files.ErrInvalidBatchRequest) {
+			writeError(w, http.StatusBadRequest, "invalid_batch_request", "batch request is invalid")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "request failed")
+			return
+		}
+
+		response := batchLookupResponse{
+			Files: make([]fileResponse, 0, len(found)),
+		}
+		for _, upload := range found {
+			response.Files = append(response.Files, newFileResponse(upload))
+		}
+		writeJSON(w, http.StatusOK, response)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, code string, message string) {

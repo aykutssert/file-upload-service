@@ -82,7 +82,12 @@ jobs:
       - name: Verify upload repository
         env:
           UPLOAD_API_TEST_DATABASE_URL: postgres://file_upload:local-development-only@127.0.0.1:5432/file_upload?sslmode=disable
-        run: go test ./internal/files -run RepositoryCreateUploadIntegration
+        run: go test ./internal/files -run 'RepositoryCreateUploadIntegration|RepositoryMarkReadyIntegration|RepositoryCompleteUploadIntegration|RepositoryDeleteUploadIntegration|RepositoryGetUploadsIntegration|RepositoryListUploadsIntegration'
+
+      - name: Verify SeaweedFS presigner
+        env:
+          UPLOAD_API_TEST_SEAWEEDFS_URL: http://127.0.0.1:8333
+        run: go test ./internal/storage -run PresignerIntegration
 
       - name: Verify health endpoints
         run: |

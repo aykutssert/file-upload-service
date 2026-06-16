@@ -29,6 +29,8 @@ func TestLiveness(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 
 	response := request(t, router, "/health/live")
@@ -37,7 +39,7 @@ func TestLiveness(t *testing.T) {
 }
 
 func TestReadinessAvailable(t *testing.T) {
-	router := NewRouter(stubReadinessChecker{}, nil, nil, nil)
+	router := NewRouter(stubReadinessChecker{}, nil, nil, nil, nil, nil)
 
 	response := request(t, router, "/health/ready")
 
@@ -47,6 +49,8 @@ func TestReadinessAvailable(t *testing.T) {
 func TestReadinessUnavailable(t *testing.T) {
 	router := NewRouter(
 		stubReadinessChecker{err: errors.New("database down")},
+		nil,
+		nil,
 		nil,
 		nil,
 		nil,
@@ -83,7 +87,7 @@ func TestCreateUploadSession(t *testing.T) {
 			CreatedAt:    time.Now(),
 		},
 	}
-	router := NewRouter(stubReadinessChecker{}, resolver, creator, stubUploadPresigner{})
+	router := NewRouter(stubReadinessChecker{}, resolver, creator, stubUploadPresigner{}, nil, nil)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/upload-sessions",
@@ -135,6 +139,8 @@ func TestCreateUploadSessionRejectsMissingIdempotencyKey(t *testing.T) {
 		&stubResolver{principal: principalWithPermission()},
 		&stubUploadCreator{},
 		stubUploadPresigner{},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -157,6 +163,8 @@ func TestCreateUploadSessionRejectsMissingPermission(t *testing.T) {
 		&stubResolver{principal: auth.Principal{ID: "principal-id", TenantID: "tenant-id"}},
 		&stubUploadCreator{},
 		stubUploadPresigner{},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -180,6 +188,8 @@ func TestCreateUploadSessionReportsIdempotencyConflict(t *testing.T) {
 		&stubResolver{principal: principalWithPermission()},
 		&stubUploadCreator{err: files.ErrIdempotencyConflict},
 		stubUploadPresigner{},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -214,7 +224,7 @@ func TestCompleteUpload(t *testing.T) {
 			OriginalName: "document.pdf",
 			ContentType:  "application/pdf",
 			ExpectedSize: 10,
-			Status:       "uploaded",
+			Status:       "ready",
 			CreatedAt:    time.Now(),
 		},
 	}
@@ -228,6 +238,8 @@ func TestCompleteUpload(t *testing.T) {
 				ContentType:   "application/pdf",
 			},
 		},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -245,14 +257,60 @@ func TestCompleteUpload(t *testing.T) {
 	if uploads.findFileID != "file-id" {
 		t.Fatalf("findFileID = %q", uploads.findFileID)
 	}
-	if uploads.markFileID != "file-id" {
-		t.Fatalf("markFileID = %q", uploads.markFileID)
+	if uploads.markReadyFileID != "file-id" {
+		t.Fatalf("markReadyFileID = %q", uploads.markReadyFileID)
 	}
 	var body completeUploadResponse
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Status != "uploaded" {
+	if body.Status != "ready" {
+		t.Fatalf("Status = %q", body.Status)
+	}
+}
+
+func TestCompleteUploadIdempotent(t *testing.T) {
+	uploads := &stubUploadCreator{
+		upload: files.Upload{
+			ID:           "file-id",
+			ObjectKey:    "tenants/tenant-id/objects/object-id",
+			OriginalName: "document.pdf",
+			ContentType:  "application/pdf",
+			ExpectedSize: 10,
+			Status:       "ready",
+			CreatedAt:    time.Now(),
+		},
+	}
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithPermission()},
+		uploads,
+		stubUploadPresigner{},
+		nil,
+		nil,
+	)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/files/file-id/complete",
+		nil,
+	)
+	request.Header.Set("Authorization", "Bearer secret-key")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status code = %d", response.Code)
+	}
+	// MarkReady must not be called for already-ready files
+	if uploads.markReadyFileID != "" {
+		t.Fatalf("MarkReady called unexpectedly: %q", uploads.markReadyFileID)
+	}
+	var body completeUploadResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Status != "ready" {
 		t.Fatalf("Status = %q", body.Status)
 	}
 }
@@ -271,6 +329,8 @@ func TestCompleteUploadRejectsMissingObject(t *testing.T) {
 			},
 		},
 		stubUploadPresigner{headErr: storage.ErrObjectNotFound},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -306,6 +366,8 @@ func TestCompleteUploadRejectsMetadataMismatch(t *testing.T) {
 				ContentType:   "application/pdf",
 			},
 		},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -336,6 +398,8 @@ func TestCompleteUploadRejectsStateConflict(t *testing.T) {
 			},
 		},
 		stubUploadPresigner{},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -367,6 +431,8 @@ func TestDownloadReadyFile(t *testing.T) {
 			},
 		},
 		stubUploadPresigner{},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -402,6 +468,8 @@ func TestDownloadRejectsMissingReadPermission(t *testing.T) {
 		&stubResolver{principal: principalWithPermission()},
 		&stubUploadCreator{},
 		stubUploadPresigner{},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -432,6 +500,8 @@ func TestDownloadRejectsFileThatIsNotReady(t *testing.T) {
 			},
 		},
 		stubUploadPresigner{},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -471,6 +541,8 @@ func TestListUploads(t *testing.T) {
 			},
 		},
 		stubUploadPresigner{},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -506,6 +578,8 @@ func TestListUploadsRejectsMissingReadPermission(t *testing.T) {
 		&stubResolver{principal: principalWithPermission()},
 		&stubUploadCreator{},
 		stubUploadPresigner{},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(http.MethodGet, "/v1/files", nil)
 	request.Header.Set("Authorization", "Bearer secret-key")
@@ -524,6 +598,8 @@ func TestListUploadsRejectsInvalidLimit(t *testing.T) {
 		&stubResolver{principal: principalWithReadPermission()},
 		&stubUploadCreator{},
 		stubUploadPresigner{},
+		nil,
+		nil,
 	)
 	request := httptest.NewRequest(http.MethodGet, "/v1/files?limit=invalid", nil)
 	request.Header.Set("Authorization", "Bearer secret-key")
@@ -551,16 +627,20 @@ func (s *stubResolver) Resolve(
 }
 
 type stubUploadCreator struct {
-	input      files.CreateUploadInput
-	upload     files.Upload
-	completed  files.Upload
-	err        error
-	findErr    error
-	findFileID string
-	listResult files.ListUploadsResult
-	listErr    error
-	markErr    error
-	markFileID string
+	input           files.CreateUploadInput
+	upload          files.Upload
+	completed       files.Upload
+	err             error
+	findErr         error
+	findFileID      string
+	listResult      files.ListUploadsResult
+	listErr         error
+	markReadyErr    error
+	markReadyFileID string
+	deleteErr       error
+	deleteFileID    string
+	getUploads      []files.Upload
+	getErr          error
 }
 
 func (s *stubUploadCreator) CreateUpload(
@@ -587,13 +667,30 @@ func (s *stubUploadCreator) ListUploads(
 	return s.listResult, s.listErr
 }
 
-func (s *stubUploadCreator) MarkUploaded(
+func (s *stubUploadCreator) MarkReady(
 	_ context.Context,
 	_ auth.Principal,
 	fileID string,
 ) (files.Upload, error) {
-	s.markFileID = fileID
-	return s.completed, s.markErr
+	s.markReadyFileID = fileID
+	return s.completed, s.markReadyErr
+}
+
+func (s *stubUploadCreator) DeleteUpload(
+	_ context.Context,
+	_ auth.Principal,
+	fileID string,
+) error {
+	s.deleteFileID = fileID
+	return s.deleteErr
+}
+
+func (s *stubUploadCreator) GetUploads(
+	_ context.Context,
+	_ auth.Principal,
+	_ []string,
+) ([]files.Upload, error) {
+	return s.getUploads, s.getErr
 }
 
 type stubUploadPresigner struct {
@@ -659,6 +756,43 @@ func principalWithReadPermission() auth.Principal {
 	}
 }
 
+func principalWithDeletePermission() auth.Principal {
+	return auth.Principal{
+		ID:       "principal-id",
+		TenantID: "tenant-id",
+		Permissions: map[string]struct{}{
+			"file:delete": {},
+		},
+	}
+}
+
+type stubKeyCreator struct {
+	created auth.CreatedAPIKey
+	err     error
+}
+
+func (s *stubKeyCreator) Create(
+	_ context.Context,
+	_ string,
+	_ *time.Time,
+) (auth.CreatedAPIKey, error) {
+	return s.created, s.err
+}
+
+type stubKeyRevoker struct {
+	keyID string
+	err   error
+}
+
+func (s *stubKeyRevoker) Revoke(
+	_ context.Context,
+	keyID string,
+	_ string,
+) error {
+	s.keyID = keyID
+	return s.err
+}
+
 func request(t *testing.T, handler http.Handler, path string) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -666,6 +800,294 @@ func request(t *testing.T, handler http.Handler, path string) *httptest.Response
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+func TestDeleteUpload(t *testing.T) {
+	uploads := &stubUploadCreator{
+		upload: files.Upload{ID: "file-id", Status: "ready"},
+	}
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithDeletePermission()},
+		uploads,
+		stubUploadPresigner{},
+		nil,
+		nil,
+	)
+	req := httptest.NewRequest(http.MethodDelete, "/v1/files/file-id", nil)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status code = %d", resp.Code)
+	}
+	if uploads.findFileID != "file-id" {
+		t.Fatalf("findFileID = %q", uploads.findFileID)
+	}
+	if uploads.deleteFileID != "file-id" {
+		t.Fatalf("deleteFileID = %q", uploads.deleteFileID)
+	}
+}
+
+func TestDeleteUploadRejectsMissingPermission(t *testing.T) {
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithPermission()},
+		&stubUploadCreator{},
+		stubUploadPresigner{},
+		nil,
+		nil,
+	)
+	req := httptest.NewRequest(http.MethodDelete, "/v1/files/file-id", nil)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("status code = %d", resp.Code)
+	}
+}
+
+func TestDeleteUploadRejectsNonReadyFile(t *testing.T) {
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithDeletePermission()},
+		&stubUploadCreator{upload: files.Upload{ID: "file-id", Status: "uploaded"}},
+		stubUploadPresigner{},
+		nil,
+		nil,
+	)
+	req := httptest.NewRequest(http.MethodDelete, "/v1/files/file-id", nil)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("status code = %d", resp.Code)
+	}
+}
+
+func TestDeleteUploadReturnsNotFound(t *testing.T) {
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithDeletePermission()},
+		&stubUploadCreator{findErr: files.ErrUploadNotFound},
+		stubUploadPresigner{},
+		nil,
+		nil,
+	)
+	req := httptest.NewRequest(http.MethodDelete, "/v1/files/other-tenant-file", nil)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status code = %d", resp.Code)
+	}
+}
+
+func TestBatchLookup(t *testing.T) {
+	uploads := &stubUploadCreator{
+		getUploads: []files.Upload{
+			{ID: "file-1", Status: "ready", CreatedAt: time.Now()},
+			{ID: "file-2", Status: "pending", CreatedAt: time.Now()},
+		},
+	}
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithReadPermission()},
+		uploads,
+		stubUploadPresigner{},
+		nil,
+		nil,
+	)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/files/batch",
+		bytes.NewBufferString(`{"ids":["a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11","b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12"]}`),
+	)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status code = %d", resp.Code)
+	}
+	var body batchLookupResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Files) != 2 {
+		t.Fatalf("file count = %d", len(body.Files))
+	}
+}
+
+func TestBatchLookupRejectsMissingPermission(t *testing.T) {
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithPermission()},
+		&stubUploadCreator{},
+		stubUploadPresigner{},
+		nil,
+		nil,
+	)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/files/batch",
+		bytes.NewBufferString(`{"ids":["a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"]}`),
+	)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("status code = %d", resp.Code)
+	}
+}
+
+func TestBatchLookupRejectsEmptyIDs(t *testing.T) {
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithReadPermission()},
+		&stubUploadCreator{},
+		stubUploadPresigner{},
+		nil,
+		nil,
+	)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/files/batch",
+		bytes.NewBufferString(`{"ids":[]}`),
+	)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status code = %d", resp.Code)
+	}
+}
+
+func TestCreateKey(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC()
+	creator := &stubKeyCreator{
+		created: auth.CreatedAPIKey{
+			ID:        "key-id",
+			RawKey:    "fus_testkey",
+			Prefix:    "fus_testke",
+			ExpiresAt: &expiresAt,
+		},
+	}
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithPermission()},
+		&stubUploadCreator{},
+		stubUploadPresigner{},
+		creator,
+		&stubKeyRevoker{},
+	)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/keys",
+		bytes.NewBufferString(`{}`),
+	)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("status code = %d", resp.Code)
+	}
+	var body createKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.ID != "key-id" {
+		t.Fatalf("ID = %q", body.ID)
+	}
+	if body.RawKey != "fus_testkey" {
+		t.Fatalf("RawKey = %q", body.RawKey)
+	}
+	if body.ExpiresAt == nil {
+		t.Fatal("ExpiresAt is nil")
+	}
+}
+
+func TestCreateKeyRejectsInvalidExpiration(t *testing.T) {
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithPermission()},
+		&stubUploadCreator{},
+		stubUploadPresigner{},
+		&stubKeyCreator{err: auth.ErrInvalidAPIKeyExpiration},
+		&stubKeyRevoker{},
+	)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/keys",
+		bytes.NewBufferString(`{}`),
+	)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status code = %d", resp.Code)
+	}
+}
+
+func TestRevokeKey(t *testing.T) {
+	revoker := &stubKeyRevoker{}
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithPermission()},
+		&stubUploadCreator{},
+		stubUploadPresigner{},
+		&stubKeyCreator{},
+		revoker,
+	)
+	req := httptest.NewRequest(http.MethodDelete, "/v1/keys/key-id", nil)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status code = %d", resp.Code)
+	}
+	if revoker.keyID != "key-id" {
+		t.Fatalf("keyID = %q", revoker.keyID)
+	}
+}
+
+func TestRevokeKeyNotFound(t *testing.T) {
+	router := NewRouter(
+		stubReadinessChecker{},
+		&stubResolver{principal: principalWithPermission()},
+		&stubUploadCreator{},
+		stubUploadPresigner{},
+		&stubKeyCreator{},
+		&stubKeyRevoker{err: auth.ErrAPIKeyNotFound},
+	)
+	req := httptest.NewRequest(http.MethodDelete, "/v1/keys/other-tenant-key", nil)
+	req.Header.Set("Authorization", "Bearer secret-key")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status code = %d", resp.Code)
+	}
 }
 
 func assertHealthResponse(

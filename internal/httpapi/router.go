@@ -12,6 +12,8 @@ func NewRouter(
 	resolver auth.Resolver,
 	uploads uploadCreator,
 	presigner uploadPresigner,
+	keyCreator keyCreatorInterface,
+	keyRevoker keyRevokerInterface,
 ) http.Handler {
 	router := chi.NewRouter()
 	router.Get("/health/live", liveHandler)
@@ -27,8 +29,17 @@ func NewRouter(
 			protected.Group(func(read chi.Router) {
 				read.Use(auth.RequirePermission("file:read"))
 				read.Get("/v1/files", listUploadsHandler(uploads))
+				read.Post("/v1/files/batch", batchLookupHandler(uploads))
 				read.Get("/v1/files/{id}/download", downloadHandler(uploads, presigner))
 			})
+			protected.Group(func(del chi.Router) {
+				del.Use(auth.RequirePermission("file:delete"))
+				del.Delete("/v1/files/{id}", deleteUploadHandler(uploads))
+			})
+			if keyCreator != nil && keyRevoker != nil {
+				protected.Post("/v1/keys", createKeyHandler(keyCreator))
+				protected.Delete("/v1/keys/{id}", revokeKeyHandler(keyRevoker))
+			}
 		})
 	}
 	return router

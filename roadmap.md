@@ -204,6 +204,13 @@ Completion criteria:
 - Pagination uses stable cursors rather than offset-based page traversal.
 - Integration tests exercise the real PostgreSQL and SeaweedFS containers.
 
+Status: complete. The full direct upload and download lifecycle is implemented and
+verified against real PostgreSQL and SeaweedFS containers. API key creation and
+revocation, file listing with stable cursors, batch metadata lookup, and
+cross-tenant isolation are in place. The complete endpoint transitions files
+directly to `ready` in v0.2; the intermediate `uploaded` and `processing` states
+are exercised by the async worker pipeline beginning in v0.4.
+
 ## v0.3 - Multipart Upload And Resume
 
 Support large files and interrupted connections.

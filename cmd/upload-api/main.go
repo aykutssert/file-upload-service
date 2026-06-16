@@ -63,6 +63,8 @@ func main() {
 			auth.NewPostgreSQLResolver(pool),
 			files.NewRepository(pool),
 			presigner,
+			auth.NewKeyCreator(pool),
+			auth.NewKeyRevoker(pool),
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

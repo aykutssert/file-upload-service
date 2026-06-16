@@ -24,6 +24,7 @@ var (
 	ErrUploadNotFound      = errors.New("upload not found")
 	ErrUploadStateConflict = errors.New("upload state conflict")
 	ErrInvalidListRequest  = errors.New("invalid list request")
+	ErrInvalidBatchRequest = errors.New("invalid batch request")
 )
 
 type QueryRower interface {
@@ -229,6 +230,7 @@ func (repository *Repository) FindUpload(
 		WHERE id = $1
 			AND tenant_id = $2
 			AND owner_principal_id = $3
+			AND status != 'deleted'
 	`, fileID, principal.TenantID, principal.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Upload{}, ErrUploadNotFound
@@ -251,6 +253,45 @@ func (repository *Repository) MarkUploaded(
 		SET
 			status = 'uploaded',
 			uploaded_at = now(),
+			updated_at = now()
+		WHERE id = $1
+			AND tenant_id = $2
+			AND owner_principal_id = $3
+			AND status = 'pending'
+		RETURNING
+			id::text,
+			tenant_id::text,
+			owner_principal_id::text,
+			object_key,
+			original_name,
+			content_type,
+			expected_size,
+			status,
+			created_at,
+			uploaded_at
+	`, fileID, principal.TenantID, principal.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Upload{}, ErrUploadStateConflict
+	}
+	return upload, err
+}
+
+func (repository *Repository) MarkReady(
+	ctx context.Context,
+	principal auth.Principal,
+	fileID string,
+) (Upload, error) {
+	fileID = strings.TrimSpace(fileID)
+	if principal.ID == "" || principal.TenantID == "" || fileID == "" {
+		return Upload{}, ErrInvalidUpload
+	}
+
+	upload, err := repository.queryUpload(ctx, `
+		UPDATE files
+		SET
+			status = 'ready',
+			uploaded_at = now(),
+			ready_at = now(),
 			updated_at = now()
 		WHERE id = $1
 			AND tenant_id = $2
@@ -361,6 +402,90 @@ func (repository *Repository) ListUploads(
 	}
 
 	return result, nil
+}
+
+func (repository *Repository) DeleteUpload(
+	ctx context.Context,
+	principal auth.Principal,
+	fileID string,
+) error {
+	fileID = strings.TrimSpace(fileID)
+	if principal.ID == "" || principal.TenantID == "" || fileID == "" {
+		return ErrInvalidUpload
+	}
+
+	var deletedID string
+	err := repository.database.QueryRow(ctx, `
+		UPDATE files
+		SET status = 'deleted', deleted_at = now(), updated_at = now()
+		WHERE id = $1
+			AND tenant_id = $2
+			AND owner_principal_id = $3
+			AND status = 'ready'
+		RETURNING id::text
+	`, fileID, principal.TenantID, principal.ID).Scan(&deletedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrUploadStateConflict
+	}
+	return err
+}
+
+func (repository *Repository) GetUploads(
+	ctx context.Context,
+	principal auth.Principal,
+	ids []string,
+) ([]Upload, error) {
+	if principal.TenantID == "" {
+		return nil, ErrInvalidBatchRequest
+	}
+	if len(ids) == 0 {
+		return []Upload{}, nil
+	}
+
+	cleaned := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); isUUID(id) {
+			cleaned = append(cleaned, id)
+		}
+	}
+	if len(cleaned) == 0 {
+		return []Upload{}, nil
+	}
+
+	rows, err := repository.database.Query(ctx, `
+		SELECT
+			id::text,
+			tenant_id::text,
+			owner_principal_id::text,
+			object_key,
+			original_name,
+			content_type,
+			expected_size,
+			status,
+			created_at,
+			uploaded_at
+		FROM files
+		WHERE tenant_id = $1
+			AND id::text = ANY($2)
+		ORDER BY created_at DESC, id DESC
+	`, principal.TenantID, cleaned)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	uploads := make([]Upload, 0, len(cleaned))
+	for rows.Next() {
+		upload, err := scanUpload(rows)
+		if err != nil {
+			return nil, err
+		}
+		uploads = append(uploads, upload)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return uploads, nil
 }
 
 func (repository *Repository) queryUpload(

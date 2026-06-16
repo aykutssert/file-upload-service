@@ -3,7 +3,7 @@
 A production-oriented large-file upload and processing platform built as a
 versioned backend engineering project.
 
-The current v0.1 foundation runs locally with:
+The current v0.2 implementation runs locally with:
 
 - Go 1.26 and Chi
 - PostgreSQL 18
@@ -67,16 +67,50 @@ detector.
 - Readiness checks PostgreSQL, SeaweedFS, and NATS.
 - A dependency outage keeps liveness healthy but changes readiness to HTTP 503.
 
-## Authentication Foundation
+## Upload Flow
 
-The API key middleware contract is implemented but not attached to public
-health endpoints. API keys resolve to a tenant-scoped user or service-account
-principal with explicit permissions.
+File bytes never pass through the API. The client receives a short-lived
+presigned PUT URL and uploads directly to SeaweedFS:
 
-The schema stores only a 32-byte SHA-256 API key hash. Raw keys are never
-persisted. The PostgreSQL resolver and protected file endpoints begin in v0.2.
+```bash
+# Create an upload session
+curl -X POST http://127.0.0.1:8080/v1/upload-sessions \
+  -H "Authorization: Bearer <key>" \
+  -H "Idempotency-Key: my-document-1" \
+  -H "Content-Type: application/json" \
+  -d '{"original_name":"report.pdf","content_type":"application/pdf","expected_size":204800}'
+
+# Client PUT to the returned upload_url (direct to SeaweedFS, not the API)
+
+# Confirm completion
+curl -X POST http://127.0.0.1:8080/v1/files/<id>/complete \
+  -H "Authorization: Bearer <key>"
+
+# Get a download URL
+curl http://127.0.0.1:8080/v1/files/<id>/download \
+  -H "Authorization: Bearer <key>"
+```
+
+## API Endpoints
+
+| Method | Path | Permission | Description |
+| --- | --- | --- | --- |
+| POST | /v1/upload-sessions | file:create | Create upload session and presigned PUT URL |
+| POST | /v1/files/{id}/complete | file:create | Confirm upload, transition to ready |
+| GET | /v1/files | file:read | List files with optional owner/status/cursor filters |
+| POST | /v1/files/batch | file:read | Resolve up to 100 file IDs |
+| GET | /v1/files/{id}/download | file:read | Get presigned download URL |
+| DELETE | /v1/files/{id} | file:delete | Soft-delete a ready file |
+| POST | /v1/keys | authenticated | Create API key for the current principal |
+| DELETE | /v1/keys/{id} | authenticated | Revoke an API key |
+
+## Authentication
+
+API keys are stored as SHA-256 hashes only. The raw key is shown once at
+creation. Each key resolves to a tenant-scoped principal with explicit
+permissions. Revoked or expired keys are rejected immediately.
 
 ## Project Status
 
-v0.1 Service Foundations is complete. See [REPORT.md](REPORT.md) for verified
-behavior and [roadmap.md](roadmap.md) for later versions.
+v0.2 Direct Upload And Download is complete. See [REPORT.md](REPORT.md) for
+verified behavior and [roadmap.md](roadmap.md) for later versions.

@@ -49,6 +49,15 @@ func TestRepositoryBuildsTenantScopedObjectKey(t *testing.T) {
 	}
 }
 
+func TestRepositoryValidatesMarkReadyInput(t *testing.T) {
+	repository := NewRepository(nil)
+
+	_, err := repository.MarkReady(context.Background(), auth.Principal{}, "")
+	if !errors.Is(err, ErrInvalidUpload) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestCreateRequestHashChangesWithRequestBody(t *testing.T) {
 	input := CreateUploadInput{
 		Principal: auth.Principal{
