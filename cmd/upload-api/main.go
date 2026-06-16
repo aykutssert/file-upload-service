@@ -67,6 +67,10 @@ func main() {
 			auth.NewKeyRevoker(pool),
 			files.NewMultipartRepository(pool),
 			presigner,
+			httpapi.FileSizeLimits{
+				MaxSinglePartBytes: cfg.MaxSinglePartBytes,
+				MaxMultipartBytes:  cfg.MaxMultipartBytes,
+			},
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

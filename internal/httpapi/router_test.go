@@ -33,6 +33,7 @@ func TestLiveness(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 
 	response := request(t, router, "/health/live")
@@ -41,7 +42,7 @@ func TestLiveness(t *testing.T) {
 }
 
 func TestReadinessAvailable(t *testing.T) {
-	router := NewRouter(stubReadinessChecker{}, nil, nil, nil, nil, nil, nil, nil)
+	router := NewRouter(stubReadinessChecker{}, nil, nil, nil, nil, nil, nil, nil, FileSizeLimits{})
 
 	response := request(t, router, "/health/ready")
 
@@ -58,6 +59,7 @@ func TestReadinessUnavailable(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 
 	response := request(t, router, "/health/ready")
@@ -91,7 +93,7 @@ func TestCreateUploadSession(t *testing.T) {
 			CreatedAt:    time.Now(),
 		},
 	}
-	router := NewRouter(stubReadinessChecker{}, resolver, creator, stubUploadPresigner{}, nil, nil, nil, nil)
+	router := NewRouter(stubReadinessChecker{}, resolver, creator, stubUploadPresigner{}, nil, nil, nil, nil, FileSizeLimits{})
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/upload-sessions",
@@ -147,6 +149,7 @@ func TestCreateUploadSessionRejectsMissingIdempotencyKey(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -173,6 +176,7 @@ func TestCreateUploadSessionRejectsMissingPermission(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -200,6 +204,7 @@ func TestCreateUploadSessionReportsIdempotencyConflict(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -252,6 +257,7 @@ func TestCompleteUpload(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -302,6 +308,7 @@ func TestCompleteUploadIdempotent(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -347,6 +354,7 @@ func TestCompleteUploadRejectsMissingObject(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -386,6 +394,7 @@ func TestCompleteUploadRejectsMetadataMismatch(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -420,6 +429,7 @@ func TestCompleteUploadRejectsStateConflict(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -455,6 +465,7 @@ func TestDownloadReadyFile(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -494,6 +505,7 @@ func TestDownloadRejectsMissingReadPermission(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -528,6 +540,7 @@ func TestDownloadRejectsFileThatIsNotReady(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -571,6 +584,7 @@ func TestListUploads(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
@@ -610,6 +624,7 @@ func TestListUploadsRejectsMissingReadPermission(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(http.MethodGet, "/v1/files", nil)
 	request.Header.Set("Authorization", "Bearer secret-key")
@@ -632,6 +647,7 @@ func TestListUploadsRejectsInvalidLimit(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	request := httptest.NewRequest(http.MethodGet, "/v1/files?limit=invalid", nil)
 	request.Header.Set("Authorization", "Bearer secret-key")
@@ -847,6 +863,7 @@ func TestDeleteUpload(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/files/file-id", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -875,6 +892,7 @@ func TestDeleteUploadRejectsMissingPermission(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/files/file-id", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -897,6 +915,7 @@ func TestDeleteUploadRejectsNonReadyFile(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/files/file-id", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -919,6 +938,7 @@ func TestDeleteUploadReturnsNotFound(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/files/other-tenant-file", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -947,6 +967,7 @@ func TestBatchLookup(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -980,6 +1001,7 @@ func TestBatchLookupRejectsMissingPermission(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -1006,6 +1028,7 @@ func TestBatchLookupRejectsEmptyIDs(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -1041,6 +1064,7 @@ func TestCreateKey(t *testing.T) {
 		&stubKeyRevoker{},
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -1080,6 +1104,7 @@ func TestCreateKeyRejectsInvalidExpiration(t *testing.T) {
 		&stubKeyRevoker{},
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -1107,6 +1132,7 @@ func TestRevokeKey(t *testing.T) {
 		revoker,
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/keys/key-id", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -1132,6 +1158,7 @@ func TestRevokeKeyNotFound(t *testing.T) {
 		&stubKeyRevoker{err: auth.ErrAPIKeyNotFound},
 		nil,
 		nil,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/keys/other-tenant-key", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")

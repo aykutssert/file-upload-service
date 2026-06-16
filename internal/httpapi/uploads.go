@@ -18,6 +18,11 @@ import (
 const idempotencyKeyHeader = "Idempotency-Key"
 const timeFormat = time.RFC3339Nano
 
+type FileSizeLimits struct {
+	MaxSinglePartBytes int64
+	MaxMultipartBytes  int64
+}
+
 type uploadCreator interface {
 	CreateUpload(context.Context, files.CreateUploadInput) (files.Upload, error)
 	FindUpload(context.Context, auth.Principal, string) (files.Upload, error)
@@ -94,6 +99,7 @@ type fileResponse struct {
 func createUploadHandler(
 	creator uploadCreator,
 	presigner uploadPresigner,
+	maxBytes int64,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, request *http.Request) {
 		principal, ok := auth.PrincipalFromContext(request.Context())
@@ -118,6 +124,11 @@ func createUploadHandler(
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json", "request body is invalid")
+			return
+		}
+		if maxBytes > 0 && body.ExpectedSize > maxBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, "file_too_large",
+				"file exceeds the maximum allowed size")
 			return
 		}
 

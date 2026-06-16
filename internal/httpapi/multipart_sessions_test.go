@@ -114,6 +114,7 @@ func TestCreateMultipartSession(t *testing.T) {
 		nil,
 		repo,
 		store,
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -156,6 +157,7 @@ func TestCreateMultipartSessionRejectsMissingIdempotencyKey(t *testing.T) {
 		nil,
 		&stubMultipartCreator{},
 		stubMultipartPresigner{},
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -188,6 +190,7 @@ func TestCompleteMultipartSessionIdempotent(t *testing.T) {
 		nil,
 		repo,
 		stubMultipartPresigner{},
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(http.MethodPost, "/v1/multipart-sessions/session-id/complete", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -218,6 +221,7 @@ func TestAbortMultipartSessionIdempotent(t *testing.T) {
 		nil,
 		repo,
 		stubMultipartPresigner{},
+		FileSizeLimits{},
 	)
 	req := httptest.NewRequest(http.MethodDelete, "/v1/multipart-sessions/already-aborted", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -256,7 +260,7 @@ func benchmarkCreateSession(b *testing.B, expectedSize int64) {
 		},
 	}
 	store := stubMultipartPresigner{uploadID: "s3-id"}
-	handler := createMultipartSessionHandler(repo, store)
+	handler := createMultipartSessionHandler(repo, store, 0)
 	principal := principalWithPermission()
 
 	body := []byte(`{"original_name":"video.mp4","content_type":"video/mp4","expected_size":` +

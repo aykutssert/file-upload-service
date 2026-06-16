@@ -19,6 +19,9 @@ const (
 	defaultSeaweedFSRegion    = "local"
 	defaultSeaweedFSSecretKey = "local-secret-key"
 	defaultSeaweedFSS3URL     = "http://127.0.0.1:8333"
+
+	DefaultMaxSinglePartBytes int64 = 100 * 1024 * 1024      // 100 MB
+	DefaultMaxMultipartBytes  int64 = 5 * 1024 * 1024 * 1024 // 5 GB
 )
 
 type Config struct {
@@ -34,6 +37,8 @@ type Config struct {
 	SeaweedFSRegion    string
 	SeaweedFSS3URL     string
 	SeaweedFSSecretKey string
+	MaxSinglePartBytes int64
+	MaxMultipartBytes  int64
 }
 
 func Load() (Config, error) {
@@ -77,6 +82,8 @@ func Load() (Config, error) {
 			"UPLOAD_API_SEAWEEDFS_SECRET_KEY",
 			defaultSeaweedFSSecretKey,
 		),
+		MaxSinglePartBytes: DefaultMaxSinglePartBytes,
+		MaxMultipartBytes:  DefaultMaxMultipartBytes,
 	}
 
 	if value := os.Getenv("UPLOAD_API_PORT"); value != "" {
@@ -96,6 +103,20 @@ func Load() (Config, error) {
 			)
 		}
 		cfg.PresignTTLSeconds = ttlSeconds
+	}
+	if value := os.Getenv("UPLOAD_API_MAX_SINGLE_PART_BYTES"); value != "" {
+		n, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || n < 1 {
+			return Config{}, fmt.Errorf("UPLOAD_API_MAX_SINGLE_PART_BYTES must be a positive integer")
+		}
+		cfg.MaxSinglePartBytes = n
+	}
+	if value := os.Getenv("UPLOAD_API_MAX_MULTIPART_BYTES"); value != "" {
+		n, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || n < 1 {
+			return Config{}, fmt.Errorf("UPLOAD_API_MAX_MULTIPART_BYTES must be a positive integer")
+		}
+		cfg.MaxMultipartBytes = n
 	}
 
 	return cfg, nil

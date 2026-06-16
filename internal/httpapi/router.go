@@ -16,6 +16,7 @@ func NewRouter(
 	keyRevoker keyRevokerInterface,
 	multipartSessions multipartCreator,
 	multipartStorage multipartPresigner,
+	limits FileSizeLimits,
 ) http.Handler {
 	router := chi.NewRouter()
 	router.Get("/health/live", liveHandler)
@@ -25,10 +26,10 @@ func NewRouter(
 			protected.Use(auth.Middleware(resolver))
 			protected.Group(func(write chi.Router) {
 				write.Use(auth.RequirePermission("file:create"))
-				write.Post("/v1/upload-sessions", createUploadHandler(uploads, presigner))
+				write.Post("/v1/upload-sessions", createUploadHandler(uploads, presigner, limits.MaxSinglePartBytes))
 				write.Post("/v1/files/{id}/complete", completeUploadHandler(uploads, presigner))
 				if multipartSessions != nil && multipartStorage != nil {
-					write.Post("/v1/multipart-sessions", createMultipartSessionHandler(multipartSessions, multipartStorage))
+					write.Post("/v1/multipart-sessions", createMultipartSessionHandler(multipartSessions, multipartStorage, limits.MaxMultipartBytes))
 					write.Get("/v1/multipart-sessions/{id}/parts/{n}", presignPartHandler(multipartSessions, multipartStorage))
 					write.Post("/v1/multipart-sessions/{id}/parts/{n}", confirmPartHandler(multipartSessions))
 					write.Get("/v1/multipart-sessions/{id}/parts", listPartsHandler(multipartSessions))

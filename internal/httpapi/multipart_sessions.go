@@ -78,6 +78,7 @@ type completeMultipartResponse struct {
 func createMultipartSessionHandler(
 	repo multipartCreator,
 	store multipartPresigner,
+	maxBytes int64,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := auth.PrincipalFromContext(r.Context())
@@ -102,6 +103,11 @@ func createMultipartSessionHandler(
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json", "request body is invalid")
+			return
+		}
+		if maxBytes > 0 && body.ExpectedSize > maxBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, "file_too_large",
+				"file exceeds the maximum allowed size")
 			return
 		}
 
